@@ -1,0 +1,36 @@
+# Render Blueprint — creates the website + a PostgreSQL database.
+# Uses FREE plans for testing. For real customers, change both plans to paid ones
+# (free web services sleep after 15 min idle; free Postgres expires after 30 days).
+services:
+  - type: web
+    name: myrepairunder100
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build
+    # migrate + seed are safe to run on every start (seed only fills an empty database)
+    startCommand: npm run db:migrate && npm run db:seed && npm start
+    healthCheckPath: /api/slots
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: myrepairunder100-db
+          property: connectionString
+      - key: DATABASE_SSL
+        value: "false"
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: HASH_SECRET
+        generateValue: true
+      - key: NEXT_PUBLIC_SITE_URL
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+databases:
+  - name: myrepairunder100-db
+    plan: free
+    region: singapore
