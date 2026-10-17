@@ -19,7 +19,7 @@ const nextConfig: NextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
   poweredByHeader: false,
   reactStrictMode: true,
-  serverExternalPackages: ["pg"],
+  serverExternalPackages: ["pg", "@neondatabase/serverless", "@netlify/database", "ws"],
   images: { formats: ["image/avif", "image/webp"] },
   async headers() {
     return [

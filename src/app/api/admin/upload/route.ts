@@ -23,7 +23,8 @@ export const POST = adminRoute("MANAGER", async (req, admin) => {
   const buf = Buffer.from(await file.arrayBuffer());
   const mime = sniff(buf);
   if (!mime) throw new ApiError(415, "Only JPEG, PNG or WebP images are allowed.");
-  const [img] = await db.insert(schema.uploadedImages).values({ mimeType: mime, bytes: buf, size: buf.length }).returning({ id: schema.uploadedImages.id });
+  // Inside a transaction so binary data always goes over a real Postgres connection (also on serverless hosts).
+  const [img] = await db.transaction((tx) => tx.insert(schema.uploadedImages).values({ mimeType: mime, bytes: buf, size: buf.length }).returning({ id: schema.uploadedImages.id }));
   await audit(admin, "image.upload", "image", img.id, { size: buf.length, mime });
   return ok({ url: `/api/images/${img.id}` }, { status: 201 });
 });

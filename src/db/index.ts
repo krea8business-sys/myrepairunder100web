@@ -1,6 +1,7 @@
 import "server-only";
 import { getDatabase } from "@netlify/database";
-import type { Pool as NeonPool } from "@neondatabase/serverless";
+import { Pool as NeonPool, type NeonQueryFunction } from "@neondatabase/serverless";
+import { drizzle as drizzleHttp } from "drizzle-orm/neon-http";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-serverless";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
@@ -12,9 +13,12 @@ const globalForDb = globalThis as unknown as { __mruDb?: DB };
 
 /**
  * Connection selection:
- *  1. DATABASE_URL set → node-postgres (local dev, Render, VPS, any Postgres host).
- *  2. Running on Netlify with Netlify Database (NETLIFY_DB_URL injected) → Netlify's own client:
- *     the Neon serverless pool inside Netlify Functions, a pg pool during builds.
+ *  1. DATABASE_URL set → node-postgres pool (local dev, Render, VPS, any long-running server).
+ *  2. Netlify Database inside Netlify Functions (serverless):
+ *     - normal queries go over Neon's stateless HTTP driver (no sockets that can go stale
+ *       while the function is frozen between requests);
+ *     - transactions open a FRESH WebSocket pool, run, and close it again.
+ *  3. Netlify Database during builds / long-running → pg pool from @netlify/database.
  */
 function createDb(): DB {
   const url = process.env.DATABASE_URL;
@@ -29,8 +33,22 @@ function createDb(): DB {
   if (process.env.NETLIFY_DB_URL) {
     const netlifyDb = getDatabase();
     if (netlifyDb.driver === "serverless") {
-      // Same query API as node-postgres; typed as DB for the rest of the app.
-      return drizzleNeon(netlifyDb.pool as NeonPool, { schema }) as unknown as DB;
+      const http = drizzleHttp(netlifyDb.httpClient as unknown as NeonQueryFunction<false, false>, { schema });
+      const transaction: DB["transaction"] = async (fn, config) => {
+        const pool = new NeonPool({ connectionString: netlifyDb.connectionString, max: 1 });
+        try {
+          const txDb = drizzleNeon(pool, { schema }) as unknown as DB;
+          return await txDb.transaction(fn, config);
+        } finally {
+          await pool.end().catch(() => {});
+        }
+      };
+      return new Proxy(http, {
+        get(target, prop, receiver) {
+          if (prop === "transaction") return transaction;
+          return Reflect.get(target, prop, receiver);
+        },
+      }) as unknown as DB;
     }
     return drizzle(netlifyDb.pool as Pool, { schema });
   }
