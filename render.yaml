@@ -16,7 +16,7 @@ services:
         value: "22"
       - key: DATABASE_URL
         fromDatabase:
-          name: myrepairunder100-db
+          name: mru-website-db
           property: connectionString
       - key: DATABASE_SSL
         value: "false"
@@ -31,6 +31,10 @@ services:
       - key: ADMIN_PASSWORD
         sync: false
 databases:
-  - name: myrepairunder100-db
+  # A NEW database used only by this website. Deliberately named differently from the
+  # database of the existing myrepairunder100-api app so the two can never be mixed up.
+  - name: mru-website-db
+    databaseName: mru_website
+    user: mru_website_user
     plan: free
     region: singapore

@@ -6,6 +6,8 @@
  * lists what it found. Override only if you are sure: MIGRATE_ALLOW_NON_EMPTY=true
  */
 import "dotenv/config";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
@@ -22,7 +24,13 @@ async function main() {
   const journal = await pool.query<{ n: string }>(
     `select count(*)::text as n from information_schema.tables where table_schema = 'drizzle' and table_name = '__drizzle_migrations'`,
   );
-  const applied = journal.rows[0].n !== "0" ? Number((await pool.query<{ n: string }>(`select count(*)::text as n from drizzle.__drizzle_migrations`)).rows[0].n) : 0;
+  const appliedHashes =
+    journal.rows[0].n !== "0" ? (await pool.query<{ hash: string }>(`select hash from drizzle.__drizzle_migrations`)).rows.map((r) => r.hash) : [];
+  const applied = appliedHashes.length;
+  // Hashes of THIS app's migration files (same algorithm drizzle uses: sha256 of the SQL file).
+  const ourJournal = JSON.parse(readFileSync("./drizzle/meta/_journal.json", "utf8")) as { entries: { tag: string }[] };
+  const ourHashes = new Set(ourJournal.entries.map((e) => createHash("sha256").update(readFileSync(`./drizzle/${e.tag}.sql`, "utf8")).digest("hex")));
+  const foreign = appliedHashes.filter((h) => !ourHashes.has(h));
   const tables = await pool.query<{ table_name: string }>(
     `select table_name from information_schema.tables where table_schema = 'public' and table_type = 'BASE TABLE' order by table_name`,
   );
@@ -33,7 +41,10 @@ async function main() {
   console.log(`• Existing tables (${tables.rows.length}): ${tables.rows.map((r) => r.table_name).join(", ") || "none"}`);
   console.log(`• Existing enum types (${types.rows.length}): ${types.rows.map((r) => r.typname).join(", ") || "none"}`);
 
-  if (applied === 0 && (tables.rows.length > 0 || types.rows.length > 0) && process.env.MIGRATE_ALLOW_NON_EMPTY !== "true") {
+  const looksForeign =
+    foreign.length > 0 || (applied === 0 && (tables.rows.length > 0 || types.rows.length > 0)) || (tables.rows.length > 0 && !tables.rows.some((r) => r.table_name === "business_settings"));
+  if (foreign.length > 0) console.log(`• Applied migrations not from this website: ${foreign.length}`);
+  if (looksForeign && process.env.MIGRATE_ALLOW_NON_EMPTY !== "true") {
     console.error(
       "\n✗ STOPPED: this database is not empty and was not set up by this website.\n" +
         "  It probably belongs to another app. Nothing has been changed.\n" +
