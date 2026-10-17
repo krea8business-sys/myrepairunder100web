@@ -116,7 +116,8 @@ await shot("04-review");
 
 // 10/18. Submit (double-click → only one booking)
 const confirm = page.getByTestId(mobile ? "confirm-booking-mobile" : "confirm-booking");
-await Promise.all([confirm.click(), confirm.click({ force: true }).catch(() => {})]);
+await confirm.waitFor();
+await confirm.evaluate((el) => { el.click(); el.click(); }); // rapid double-click
 await page.waitForURL(/\/booking\/MRU-[A-Z0-9]{8}\?new=1/, { timeout: 15000 });
 const code = (await page.getByTestId("booking-code").innerText()).trim();
 assert.match(code, /^MRU-[A-HJ-NP-Z2-9]{8}$/);

@@ -25,7 +25,22 @@ Set these on the host. The full list with descriptions is in `.env.example`.
 
 The server refuses to start admin sessions in production if `SESSION_SECRET` is missing or shorter than 32 characters.
 
-## 3. Build, migrate, seed
+## Netlify (recommended for this project)
+
+The repo is ready for Netlify: `netlify.toml` is included, the Next.js runtime is detected automatically, and the database is **Netlify Database** (built-in Postgres).
+
+1. Sign in at app.netlify.com (use "Sign up with GitHub").
+2. **Add new project → Import an existing project → GitHub** and choose the `myrepairunder100web` repository. Leave the build settings as detected and click **Deploy**.
+3. In the project, open **Data & Storage → Database** and create the database (if Netlify hasn't already created one). Schema and starter data are applied automatically from `netlify/database/migrations/` on each production deploy.
+4. **Project configuration → Environment variables**, add:
+   - `SESSION_SECRET` and `HASH_SECRET`: two different random strings of 32+ characters
+   - `ADMIN_EMAIL` and `ADMIN_PASSWORD` (12+ characters): the first time you sign in at `/admin` with exactly these, the owner account is created
+   - `NEXT_PUBLIC_SITE_URL`: your Netlify address, e.g. `https://myrepairunder100.netlify.app`
+5. **Deploys → Trigger deploy → Deploy site**. When it's published, open the site, then `/admin`.
+
+Do not set `DATABASE_URL` on Netlify. When it's absent, the app uses Netlify Database automatically.
+
+## 3. Build, migrate, seed (other hosts)
 
 ```bash
 npm ci

@@ -13,13 +13,13 @@ type Tx = Parameters<Parameters<DB["transaction"]>[0]>[0];
 export async function getAvailability(settings: Settings, conn: DB | Tx = db, now = new Date()): Promise<DayAvailability[]> {
   const start = nowIST(now).date;
   const end = addDays(start, Math.max(0, settings.bookingWindowDays - 1));
-  const [slots, blocks, countRows] = await Promise.all([
-    conn.select().from(schema.timeSlots).orderBy(asc(schema.timeSlots.sortOrder)),
-    conn
-      .select()
-      .from(schema.blockedPeriods)
-      .where(and(gte(schema.blockedPeriods.date, start), lte(schema.blockedPeriods.date, end))),
-    conn
+  // Sequential on purpose: inside a transaction all queries share one connection.
+  const slots = await conn.select().from(schema.timeSlots).orderBy(asc(schema.timeSlots.sortOrder));
+  const blocks = await conn
+    .select()
+    .from(schema.blockedPeriods)
+    .where(and(gte(schema.blockedPeriods.date, start), lte(schema.blockedPeriods.date, end)));
+  const countRows = await conn
       .select({
         date: schema.bookings.scheduledDate,
         slotId: schema.bookings.slotId,
@@ -34,8 +34,7 @@ export async function getAvailability(settings: Settings, conn: DB | Tx = db, no
           inArray(schema.bookings.status, CAPACITY_STATUSES),
         ),
       )
-      .groupBy(schema.bookings.scheduledDate, schema.bookings.slotId, schema.bookings.isAsap),
-  ]);
+      .groupBy(schema.bookings.scheduledDate, schema.bookings.slotId, schema.bookings.isAsap);
   const counts: BookingCounts = {};
   for (const r of countRows) {
     const key = r.isAsap ? `${r.date}|ASAP` : `${r.date}|${r.slotId}`;

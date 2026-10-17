@@ -1,5 +1,6 @@
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { timingSafeEqual } from "node:crypto";
+import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { startAdminSession } from "@/server/admin-auth";
@@ -21,6 +22,7 @@ export async function POST(req: Request) {
     const perEmail = await rateLimit("admin-login-email", parsed.data.email, 10, 3600);
     if (!perEmail.allowed) return fail(429, "Too many sign-in attempts. Try again later.");
 
+    await bootstrapOwner(parsed.data.email, parsed.data.password);
     const rows = await db.select().from(schema.adminUsers).where(eq(schema.adminUsers.email, parsed.data.email)).limit(1);
     const admin = rows[0];
     const okPw = await bcrypt.compare(parsed.data.password, admin?.passwordHash ?? DUMMY);
@@ -34,4 +36,28 @@ export async function POST(req: Request) {
     logError("admin login", e);
     return fail(500, "Sign-in failed. Please try again.");
   }
+}
+
+const same = (a: string, b: string) => {
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && timingSafeEqual(x, y);
+};
+
+/**
+ * First-run setup for hosts without a seed step (e.g. Netlify): when NO admin exists yet and the
+ * submitted credentials exactly match the ADMIN_EMAIL / ADMIN_PASSWORD environment variables,
+ * create that OWNER account. Does nothing once any admin exists.
+ */
+async function bootstrapOwner(email: string, password: string) {
+  const envEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const envPassword = process.env.ADMIN_PASSWORD;
+  if (!envEmail || !envPassword || envPassword.length < 12) return;
+  if (!same(email, envEmail) || !same(password, envPassword)) return;
+  const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.adminUsers);
+  if (Number(n) > 0) return;
+  await db
+    .insert(schema.adminUsers)
+    .values({ email: envEmail, name: "Owner", role: "OWNER", passwordHash: await bcrypt.hash(envPassword, 12) })
+    .onConflictDoNothing();
 }

@@ -1,4 +1,4 @@
-import { after } from "next/server";
+import { runAfter } from "@/server/after";
 import { createBookingSchema } from "@/lib/validation";
 import { BookingError, createBooking, safeNotify } from "@/server/bookings";
 import { grantAccess } from "@/server/customer-access";
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
     const settings = await getSettings();
     const { booking, replayed } = await createBooking(parsed.data, settings);
     await grantAccess(booking.code);
-    if (!replayed) after(() => safeNotify(booking, "booking.created", settings));
+    if (!replayed) runAfter(() => safeNotify(booking, "booking.created", settings));
     return ok({ code: booking.code, status: booking.status, replayed }, { status: replayed ? 200 : 201 });
   } catch (e) {
     if (e instanceof BookingError) {
