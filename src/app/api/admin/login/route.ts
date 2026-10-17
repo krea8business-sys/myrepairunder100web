@@ -22,10 +22,11 @@ export async function POST(req: Request) {
     const perEmail = await rateLimit("admin-login-email", parsed.data.email, 10, 3600);
     if (!perEmail.allowed) return fail(429, "Too many sign-in attempts. Try again later.");
 
-    await bootstrapOwner(parsed.data.email, parsed.data.password);
+    const setupProblem = await bootstrapOwner(parsed.data.email, parsed.data.password);
+    if (setupProblem) return fail(401, setupProblem);
     const rows = await db.select().from(schema.adminUsers).where(eq(schema.adminUsers.email, parsed.data.email)).limit(1);
     const admin = rows[0];
-    const okPw = await bcrypt.compare(parsed.data.password, admin?.passwordHash ?? DUMMY);
+    const okPw = (await bcrypt.compare(parsed.data.password, admin?.passwordHash ?? DUMMY)) || (await bcrypt.compare(parsed.data.password.trim(), admin?.passwordHash ?? DUMMY));
     if (!admin || !okPw || !admin.active) return fail(401, "Incorrect email or password.");
 
     await db.update(schema.adminUsers).set({ lastLoginAt: new Date() }).where(eq(schema.adminUsers.id, admin.id));
@@ -49,15 +50,25 @@ const same = (a: string, b: string) => {
  * submitted credentials exactly match the ADMIN_EMAIL / ADMIN_PASSWORD environment variables,
  * create that OWNER account. Does nothing once any admin exists.
  */
-async function bootstrapOwner(email: string, password: string) {
-  const envEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
-  const envPassword = process.env.ADMIN_PASSWORD;
-  if (!envEmail || !envPassword || envPassword.length < 12) return;
-  if (!same(email, envEmail) || !same(password, envPassword)) return;
+async function bootstrapOwner(email: string, password: string): Promise<string | null> {
   const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.adminUsers);
-  if (Number(n) > 0) return;
+  if (Number(n) > 0) return null; // normal sign-in
+
+  // No admin exists yet → first-run setup. Explain what's wrong (safe: there is no account to protect yet).
+  const envEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const envPassword = process.env.ADMIN_PASSWORD?.trim();
+  if (!envEmail || !envPassword) {
+    return "Setup not finished: ADMIN_EMAIL and ADMIN_PASSWORD are not set on the server. Add them in your hosting environment variables and redeploy.";
+  }
+  if (envPassword.length < 12) {
+    return "Setup not finished: ADMIN_PASSWORD on the server is shorter than 12 characters. Change it and redeploy.";
+  }
+  if (!same(email.trim().toLowerCase(), envEmail) || !same(password.trim(), envPassword)) {
+    return "First sign-in: use exactly the ADMIN_EMAIL and ADMIN_PASSWORD set in your hosting environment variables.";
+  }
   await db
     .insert(schema.adminUsers)
     .values({ email: envEmail, name: "Owner", role: "OWNER", passwordHash: await bcrypt.hash(envPassword, 12) })
     .onConflictDoNothing();
+  return null;
 }
